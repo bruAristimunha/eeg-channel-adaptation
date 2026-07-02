@@ -71,6 +71,7 @@ class LayerProbe(nn.Module):
         probe_layer: str,
         example_inputs: tuple,
         aggregation: str = "flatten",
+        call_fn=None,
     ) -> None:
         super().__init__()
         if aggregation not in ("flatten", "mean"):
@@ -121,6 +122,11 @@ class LayerProbe(nn.Module):
         self._handle = submodule.register_forward_hook(_capture)
         weakref.finalize(self, self._handle.remove)
 
+        # How to invoke the backbone. Default is a positional call; pass call_fn
+        # for models needing keyword args (e.g. LUNA channel_locations). The hook
+        # still fires on the tapped submodule regardless of how the model is called.
+        self._call = call_fn if call_fn is not None else self.backbone
+
         # Detect the batch axis + per-sample group by probing at two batch sizes,
         # then size a concrete head (Lightning builds the optimizer before the
         # first real forward, so a LazyLinear head would be skipped).
@@ -141,7 +147,7 @@ class LayerProbe(nn.Module):
         if device is not None:
             inputs = tuple(t.to(device) if torch.is_tensor(t) else t for t in inputs)
         self._act.clear()
-        self.backbone(*inputs)
+        self._call(*inputs)
         if not self._act:
             raise RuntimeError(
                 f"probe_layer={self.probe_layer!r} produced no activation; the "

@@ -23,6 +23,7 @@ LAYERS="${LAYERS:-0 2 4 6 8 10 11}"
 case "$MODEL" in
   cbramod) SCRIPT=run_cbramod_experiments.py; PREFIX=encoder.layers;        NDIR=luna_native_raw ;;
   eegpt)   SCRIPT=run_eegpt_experiments.py;   PREFIX=target_encoder.blocks; NDIR=luna_native ;;
+  luna)    SCRIPT=run_luna_experiments.py;    PREFIX=blocks;                NDIR=luna_native ;;
   *) echo "unknown MODEL=$MODEL"; exit 1 ;;
 esac
 
