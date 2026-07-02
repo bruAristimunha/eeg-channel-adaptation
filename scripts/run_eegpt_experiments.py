@@ -283,6 +283,9 @@ class EEGPTExperimentModule(pl.LightningModule):
         warmup_epochs: int = 5,
         max_epochs: int = 50,
         eta_min: float = 1e-6,
+        probe_layer: str | None = None,
+        probe_aggregation: str = "flatten",
+        init_from: str | None = None,
     ):
         super().__init__()
         self.save_hyperparameters()
@@ -312,11 +315,27 @@ class EEGPTExperimentModule(pl.LightningModule):
 
         self._load_pretrained()
 
+        if init_from is not None:
+            ckpt = torch.load(init_from, map_location="cpu", weights_only=False)
+            sd = ckpt.get("state_dict", ckpt)
+            model_sd = {k[len("model."):]: v for k, v in sd.items() if k.startswith("model.")}
+            missing, _ = self.model.load_state_dict(model_sd, strict=False)
+            log.info("Loaded %d weights from checkpoint %s (%d missing)",
+                     len(model_sd), init_from, len(missing))
+
         # Freeze based on training mode
         if training_mode == "probe":
             for name, param in self.model.named_parameters():
                 if "final_layer" not in name and "chan_proj" not in name:
                     param.requires_grad = False
+
+        # Optional layer-wise linear probe on the frozen backbone (EXPERIMENTS.md Path B).
+        self.probe = None
+        if probe_layer is not None:
+            from adapter_finetuning.probe_layer import LayerProbe
+            ex = torch.randn(2, n_chans, n_times)
+            self.probe = LayerProbe(self.model, n_outputs, probe_layer,
+                                    example_inputs=(ex,), aggregation=probe_aggregation)
 
         trainable = sum(p.numel() for p in self.parameters() if p.requires_grad)
         total = sum(p.numel() for p in self.parameters())
@@ -369,6 +388,8 @@ class EEGPTExperimentModule(pl.LightningModule):
             log.info("Skipped (shape mismatch): %s", skipped[:5])
 
     def forward(self, x):
+        if self.probe is not None:
+            return self.probe(x)
         return self.model(x)
 
     def _shared_step(self, batch):
@@ -460,6 +481,9 @@ def run_experiment(
     wandb_entity: str = "braindecode",
     wandb_project: str = "adapter-finetuning",
     fast_dev_run: bool = False,
+    probe_layer: str | None = None,
+    probe_aggregation: str = "flatten",
+    init_from: str | None = None,
 ):
     try:
         import numpy as _np
@@ -541,6 +565,9 @@ def run_experiment(
         sfreq=actual_sfreq,
         use_chan_proj=use_chan_proj,
         training_mode=training_mode,
+        probe_layer=probe_layer,
+        probe_aggregation=probe_aggregation,
+        init_from=init_from,
         lr=train_config["lr"],
         weight_decay=train_config["weight_decay"],
         warmup_epochs=train_config["warmup_epochs"],
@@ -628,6 +655,11 @@ def main():
     parser.add_argument("--omneeg-dir", type=Path, default=DEFAULT_OMNEEG_DIR)
     parser.add_argument("--output-dir", type=Path, default=DEFAULT_OUTPUT_DIR)
     parser.add_argument("--fast-dev-run", action="store_true")
+    parser.add_argument("--probe-layer", type=str, default=None,
+                        help="Tap this submodule and train a linear probe on it (e.g. target_encoder.blocks.6).")
+    parser.add_argument("--probe-aggregation", type=str, default="flatten", choices=["flatten", "mean"])
+    parser.add_argument("--init-from", type=str, default=None,
+                        help="Load model weights from this .ckpt into the backbone before freezing/probing.")
     parser.add_argument("--wandb-entity", type=str, default="braindecode")
     parser.add_argument("--wandb-project", type=str, default="adapter-finetuning")
 
@@ -658,6 +690,9 @@ def main():
                     data_dir=data_dir, output_dir=args.output_dir,
                     wandb_entity=args.wandb_entity, wandb_project=args.wandb_project,
                     fast_dev_run=args.fast_dev_run,
+                    probe_layer=args.probe_layer,
+                    probe_aggregation=args.probe_aggregation,
+                    init_from=args.init_from,
                 )
                 dataset_results.append(score)
             except Exception as e:
