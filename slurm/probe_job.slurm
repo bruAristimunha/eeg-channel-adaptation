@@ -7,7 +7,7 @@
 #SBATCH --ntasks-per-node=1
 #SBATCH --cpus-per-task=8
 #SBATCH --mem=32G
-#SBATCH --time=06:00:00
+#SBATCH --time=08:00:00
 #SBATCH --output=/home/bpinto/work/adapting-fbm/logs/%x_%j.out
 #SBATCH --error=/home/bpinto/work/adapting-fbm/logs/%x_%j.err
 
@@ -37,7 +37,7 @@ export HF_HOME=/expanse/projects/nemar/dtyoung/huggingface_cache
 export MNE_DATA=/expanse/projects/nemar/dtyoung/mne_data
 export TMPDIR=/expanse/projects/nemar/eeg_finetuning/.cache/tmp
 export WANDB_MODE=offline
-export PYTHONPATH="$REPO:$PYTHONPATH"
+export PYTHONPATH="$REPO:${PYTHONPATH:-}"
 
 echo "=== $(hostname) | MODEL=$MODEL KIND=$KIND DATASETS=[$DATASETS] | $(date) ==="
 for D in $DATASETS; do
