@@ -279,6 +279,8 @@ class CBraModExperimentModule(pl.LightningModule):
         warmup_epochs: int = 5,
         max_epochs: int = 50,
         eta_min: float = 1e-6,
+        probe_layer: str | None = None,
+        probe_aggregation: str = "flatten",
     ):
         super().__init__()
         self.save_hyperparameters()
@@ -322,6 +324,14 @@ class CBraModExperimentModule(pl.LightningModule):
                 if "final_layer" not in name:
                     param.requires_grad = False
 
+        # Optional layer-wise linear probe on a frozen backbone (EXPERIMENTS.md Path B).
+        self.probe = None
+        if probe_layer is not None:
+            from adapter_finetuning.probe_layer import LayerProbe
+            ex = torch.randn(2, model_n_chans, n_times)
+            self.probe = LayerProbe(self.model, n_outputs, probe_layer,
+                                    example_inputs=(ex,), aggregation=probe_aggregation)
+
         trainable = sum(p.numel() for p in self.parameters() if p.requires_grad)
         total = sum(p.numel() for p in self.parameters())
         log.info(
@@ -363,6 +373,8 @@ class CBraModExperimentModule(pl.LightningModule):
     def forward(self, x):
         if self.bridge is not None:
             x = self.bridge(x)
+        if self.probe is not None:
+            return self.probe(x)
         return self.model(x)
 
     def _shared_step(self, batch):
@@ -454,6 +466,8 @@ def run_experiment(
     wandb_entity: str = "braindecode",
     wandb_project: str = "adapter-finetuning",
     fast_dev_run: bool = False,
+    probe_layer: str | None = None,
+    probe_aggregation: str = "flatten",
 ):
     try:
         import numpy as _np
@@ -537,6 +551,8 @@ def run_experiment(
         use_bridge=use_bridge,
         native_mode=native_mode,
         training_mode=training_mode,
+        probe_layer=probe_layer,
+        probe_aggregation=probe_aggregation,
         lr=train_config["lr"],
         weight_decay=train_config["weight_decay"],
         warmup_epochs=train_config["warmup_epochs"],
@@ -625,6 +641,12 @@ def main():
     parser.add_argument("--omneeg-dir", type=Path, default=DEFAULT_OMNEEG_DIR)
     parser.add_argument("--output-dir", type=Path, default=DEFAULT_OUTPUT_DIR)
     parser.add_argument("--fast-dev-run", action="store_true")
+    parser.add_argument("--probe-layer", type=str, default=None,
+                        help="Tap this submodule and train a linear probe on it (frozen backbone). "
+                             "E.g. encoder.layers.6 . Use with --mode native --training-mode probe.")
+    parser.add_argument("--probe-aggregation", type=str, default="flatten",
+                        choices=["flatten", "mean"],
+                        help="Reduce the tapped activation; use 'mean' for transformer blocks.")
     parser.add_argument("--wandb-entity", type=str, default="braindecode")
     parser.add_argument("--wandb-project", type=str, default="adapter-finetuning")
 
@@ -655,6 +677,8 @@ def main():
                     data_dir=data_dir, output_dir=args.output_dir,
                     wandb_entity=args.wandb_entity, wandb_project=args.wandb_project,
                     fast_dev_run=args.fast_dev_run,
+                    probe_layer=args.probe_layer,
+                    probe_aggregation=args.probe_aggregation,
                 )
                 dataset_results.append(score)
             except Exception as e:
