@@ -281,6 +281,7 @@ class CBraModExperimentModule(pl.LightningModule):
         eta_min: float = 1e-6,
         probe_layer: str | None = None,
         probe_aggregation: str = "flatten",
+        init_from: str | None = None,
     ):
         super().__init__()
         self.save_hyperparameters()
@@ -317,6 +318,16 @@ class CBraModExperimentModule(pl.LightningModule):
 
         # Load pretrained weights
         self._load_pretrained()
+
+        # Optionally override with a fine-tuned checkpoint (e.g. probe an SFT model
+        # to measure per-layer feature distortion; EXPERIMENTS.md Exp 4).
+        if init_from is not None:
+            ckpt = torch.load(init_from, map_location="cpu", weights_only=False)
+            sd = ckpt.get("state_dict", ckpt)
+            model_sd = {k[len("model."):]: v for k, v in sd.items() if k.startswith("model.")}
+            missing, _ = self.model.load_state_dict(model_sd, strict=False)
+            log.info("Loaded %d weights from checkpoint %s (%d missing)",
+                     len(model_sd), init_from, len(missing))
 
         # Freeze based on training mode
         if training_mode == "probe":
@@ -468,6 +479,7 @@ def run_experiment(
     fast_dev_run: bool = False,
     probe_layer: str | None = None,
     probe_aggregation: str = "flatten",
+    init_from: str | None = None,
 ):
     try:
         import numpy as _np
@@ -553,6 +565,7 @@ def run_experiment(
         training_mode=training_mode,
         probe_layer=probe_layer,
         probe_aggregation=probe_aggregation,
+        init_from=init_from,
         lr=train_config["lr"],
         weight_decay=train_config["weight_decay"],
         warmup_epochs=train_config["warmup_epochs"],
@@ -647,6 +660,9 @@ def main():
     parser.add_argument("--probe-aggregation", type=str, default="flatten",
                         choices=["flatten", "mean"],
                         help="Reduce the tapped activation; use 'mean' for transformer blocks.")
+    parser.add_argument("--init-from", type=str, default=None,
+                        help="Load model weights from this .ckpt into the backbone before "
+                             "freezing/probing (e.g. probe an SFT checkpoint for distortion).")
     parser.add_argument("--wandb-entity", type=str, default="braindecode")
     parser.add_argument("--wandb-project", type=str, default="adapter-finetuning")
 
@@ -679,6 +695,7 @@ def main():
                     fast_dev_run=args.fast_dev_run,
                     probe_layer=args.probe_layer,
                     probe_aggregation=args.probe_aggregation,
+                    init_from=args.init_from,
                 )
                 dataset_results.append(score)
             except Exception as e:
