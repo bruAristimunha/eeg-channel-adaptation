@@ -18,14 +18,15 @@
 #   LAYERS   = "0 2 4 6 8 10 11"         (optional; default all-block sweep)
 set -u
 : "${MODEL:?set MODEL}"; : "${KIND:?set KIND}"; : "${DATASETS:?set DATASETS}"
-LAYERS="${LAYERS:-0 2 4 6 8 10 11}"
 
+# Per-model depth: CBraMod has 12 encoder layers (0-11); EEGPT/LUNA have 8 blocks (0-7).
 case "$MODEL" in
-  cbramod) SCRIPT=run_cbramod_experiments.py; PREFIX=encoder.layers;        NDIR=luna_native_raw ;;
-  eegpt)   SCRIPT=run_eegpt_experiments.py;   PREFIX=target_encoder.blocks; NDIR=luna_native ;;
-  luna)    SCRIPT=run_luna_experiments.py;    PREFIX=blocks;                NDIR=luna_native ;;
+  cbramod) SCRIPT=run_cbramod_experiments.py; PREFIX=encoder.layers;        NDIR=luna_native_raw; DEFLAYERS="0 2 4 6 8 10 11" ;;
+  eegpt)   SCRIPT=run_eegpt_experiments.py;   PREFIX=target_encoder.blocks; NDIR=luna_native;     DEFLAYERS="0 1 2 3 4 5 6 7" ;;
+  luna)    SCRIPT=run_luna_experiments.py;    PREFIX=blocks;                NDIR=luna_native;     DEFLAYERS="0 1 2 3 4 5 6 7" ;;
   *) echo "unknown MODEL=$MODEL"; exit 1 ;;
 esac
+LAYERS="${LAYERS:-$DEFLAYERS}"
 
 REPO=/home/bpinto/work/adapting-fbm
 DATA=/expanse/projects/nemar/kuntal/adapter_finetuning/data/$NDIR
